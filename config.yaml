@@ -1,0 +1,47 @@
+# Mercari Bargain Hunter Configuration
+# Search keywords are now managed in the DB `keywords` table.
+# Use `python3 seed_keywords.py` to import initial keywords.
+
+crawler:
+  interval_seconds: 30          # クロール間隔（基準値）
+  wait_min: 20                  # 最小ウェイト（秒）— ランダムウェイトの下限
+  wait_max: 40                  # 最大ウェイト（秒）— ランダムウェイトの上限
+  timeout: 30                   # ページ読み込みタイムアウト
+  max_retries: 3                # リトライ回数
+  max_items: 100                # 各キーワードで取得する最大商品数（ページネーション有効）
+  delay_range: [2, 5]           # リトライ時のランダム遅延（秒）
+  # プロキシリスト（オプション — 空なら直結）
+  proxies: []
+    # - "http://user:pass@proxy-host:8080"
+
+market_price:
+  calculation_method: "median"       # central/average/hybrid
+  lookback_days: 30                  # 過去何日間のデータを使うか
+  threshold_ratio: 0.7               # 相場の70%以下を「安い」と判定（仕様書準拠）
+  absolute_threshold_yen: 6000       # 絶対値：6000円以上安い
+
+filtering:
+  allowed_conditions:
+    - "新品・未使用"
+    - "未使用に近い"
+    - "目立った傷や汚れなし"
+  banned_words:
+    - "ジャンク"
+    - "動作未確認"
+    - "壊れている"
+    - "部品取り"
+    - "故障"
+    - "修理済み"
+
+notification:
+  # All secrets in .env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+warmup:
+  rounds: 3                          # 初期ウォームアップ回数（通知なしでデータ収集）
+
+database:
+  host: "localhost"
+  port: 5432
+  dbname: "mercari"
+  user: "mercari"
+  password: "mercari"

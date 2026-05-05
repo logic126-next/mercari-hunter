@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mercari Hunter Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+body { background: #0f1117; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 0; }
+.card { background: #161925; border: 1px solid #2a2f45; border-radius: 12px; }
+.card:hover { border-color: #6366f1; }
+.stat-num { font-size: 2rem; font-weight: 700; }
+.stat-label { font-size: 0.85rem; color: #94a3b8; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; padding: 10px 12px; font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; border-bottom: 1px solid #2a2f45; }
+td { padding: 10px 12px; border-bottom: 1px solid #1e2233; font-size: 0.9rem; }
+tr:hover td { background: #1e2233; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-green { background: #064e3b; color: #6ee7b7; }
+.badge-red { background: #7f1d1d; color: #fca5a5; }
+.badge-purple { background: #4c1d95; color: #c4b5fd; }
+a.item-link { color: #818cf8; text-decoration: none; word-break: break-all; }
+a.item-link:hover { text-decoration: underline; color: #a5b4fc; }
+select, input { background: #1e2233; border: 1px solid #2a2f45; color: #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; }
+select:focus, input:focus { outline: none; border-color: #6366f1; }
+.chart-container { position: relative; height: 320px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header style="border-bottom:1px solid #2a2f45; background:#161925; position:sticky; top:0; z-index:50;">
+  <div style="max-width:1280px; margin:0 auto; padding:16px 24px; display:flex; align-items:center; justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-size:1.5rem;">🛒</span>
+      <h1 style="margin:0; font-size:1.25rem; font-weight:700;">Mercari Hunter <span style="color:#818cf8;">Dashboard</span></h1>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px; font-size:0.85rem; color:#94a3b8;">
+      <span id="lastUpdate">更新中...</span>
+      <button onclick="refreshAll()" style="padding:8px 16px; background:rgba(99,102,241,0.2); color:#818cf8; border:1px solid #2a2f45; border-radius:8px; cursor:pointer;">↻ Refresh</button>
+    </div>
+  </div>
+</header>
+
+<main style="max-width:1280px; margin:0 auto; padding:24px;">
+
+  <!-- Summary Cards -->
+  <section style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:24px;">
+    <div class="card" style="padding:20px;"><div class="stat-label">全商品数</div><div class="stat-num" id="s-total">—</div></div>
+    <div class="card" style="padding:20px;"><div class="stat-label">アクティブキーワード</div><div class="stat-num" id="s-keywords">—</div></div>
+    <div class="card" style="padding:20px;"><div class="stat-label">ブランド数</div><div class="stat-num" id="s-brands">—</div></div>
+    <div class="card" style="padding:20px;"><div class="stat-label">平均価格</div><div class="stat-num" id="s-avg">—</div></div>
+    <div class="card" style="padding:20px;"><div class="stat-label">中央値価格</div><div class="stat-num" id="s-median">—</div></div>
+    <div class="card" style="padding:20px;"><div class="stat-label">最新クロール</div><div class="stat-num" id="s-last" style="font-size:1rem;">—</div></div>
+  </section>
+
+  <!-- Charts Row -->
+  <section style="display:grid; grid-template-columns:repeat(auto-fit,minmax(480px,1fr)); gap:24px; margin-bottom:24px;">
+    <div class="card" style="padding:20px;">
+      <h2 style="font-weight:600; margin:0 0 16px;">📊 価格分布</h2>
+      <div class="chart-container"><canvas id="chartPriceDist"></canvas></div>
+    </div>
+    <div class="card" style="padding:20px;">
+      <h2 style="font-weight:600; margin:0 0 16px;">📈 時間推移（24h）</h2>
+      <div class="chart-container"><canvas id="chartTrend"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Brands Table -->
+  <section class="card" style="padding:20px; margin-bottom:24px;">
+    <h2 style="font-weight:600; margin:0 0 16px;">🏷️ ブランド別集計 <span id="brandCount" style="font-size:0.85rem; color:#64748b; font-weight:normal;"></span></h2>
+    <div style="overflow-x:auto;">
+      <table id="brandTable">
+        <thead><tr><th>ブランド</th><th>件数</th><th>平均価格</th><th>中央値</th><th>最低</th><th>最高</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Keywords + Bargains -->
+  <section style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+    <div class="card" style="padding:20px;">
+      <h2 style="font-weight:600; margin:0 0 16px;">🔑 キーワード状態</h2>
+      <div style="overflow-x:auto;">
+        <table id="keywordTable">
+          <thead><tr><th>キーワード</th><th>カテゴリ</th><th>件数</th><th>平均価格</th><th>最終更新</th><th>ステータス</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="padding:20px;">
+      <h2 style="font-weight:600; margin:0 0 16px;">💎 掘り出し物候補</h2>
+      <div style="overflow-x:auto; max-height:400px;">
+        <table id="bargainTable">
+          <thead><tr><th>商品名</th><th>価格</th><th>市価中央値</th><th>差額</th><th>リンク</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Items List -->
+  <section class="card" style="padding:20px; margin-bottom:24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+      <h2 style="font-weight:600; margin:0;">🛍️ 商品一覧 <span id="itemCount" style="font-size:0.85rem; color:#64748b; font-weight:normal;"></span></h2>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <input type="text" id="searchQ" placeholder="検索..." style="width:200px;" oninput="loadItems()">
+        <select id="sortSelect" onchange="loadItems()">
+          <option value="newest">最新順</option>
+          <option value="cheap">安い順</option>
+          <option value="expensive">高い順</option>
+        </select>
+        <select id="brandFilter" onchange="loadItems()">
+          <option value="">全ブランド</option>
+        </select>
+        <select id="catFilter" onchange="loadItems()">
+          <option value="">全カテゴリ</option>
+        </select>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="itemsTable">
+        <thead><tr><th>商品名</th><th>ブランド</th><th>型番</th><th>価格</th><th>カテゴリ</th><th>クロール日</th><th>リンク</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px;">
+      <button onclick="prevPage()" id="btnPrev" style="padding:8px 16px; background:#1e2233; color:#e2e8f0; border:1px solid #2a2f45; border-radius:8px; cursor:pointer;">← 前へ</button>
+      <span id="pageInfo" style="font-size:0.85rem; color:#94a3b8;"></span>
+      <button onclick="nextPage()" id="btnNext" style="padding:8px 16px; background:#1e2233; color:#e2e8f0; border:1px solid #2a2f45; border-radius:8px; cursor:pointer;">次へ →</button>
+    </div>
+  </section>
+
+  <!-- Market Prices -->
+  <section class="card" style="padding:20px; margin-bottom:24px;">
+    <h2 style="font-weight:600; margin:0 0 16px;">📋 相場データ <span id="mpCount" style="font-size:0.85rem; color:#64748b; font-weight:normal;"></span></h2>
+    <div style="overflow-x:auto; max-height:360px;">
+      <table id="mpTable">
+        <thead><tr><th>商品名</th><th>ブランド</th><th>型番</th><th>中央値</th><th>平均</th><th>最小</th><th>最大</th><th>サンプル数</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Sellers Section -->
+  <section class="card" style="padding:20px; margin-bottom:24px;">
+    <h2 style="font-weight:600; margin:0 0 16px;">👤 出品者一覧 <span id="sellerCount" style="font-size:0.85rem; color:#64748b; font-weight:normal;"></span></h2>
+    <div style="overflow-x:auto;">
+      <table id="sellerTable">
+        <thead><tr><th>ユーザー名</th><th>表示名</th><th>商品数</th><th>平均価格</th><th>最終クロール</th><th>ステータス</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="sellerItemsPanel" style="display:none; margin-top:24px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+        <h3 id="sellerItemsTitle" style="font-weight:600; margin:0;"></h3>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <select id="sellerSortSelect" onchange="loadSellerItems()">
+            <option value="newest">最新順</option>
+            <option value="cheap">安い順</option>
+            <option value="expensive">高い順</option>
+          </select>
+          <button onclick="document.getElementById('sellerItemsPanel').style.display='none'" style="padding:6px 12px; background:#1e2233; color:#e2e8f0; border:1px solid #2a2f45; border-radius:6px; cursor:pointer;">✕ 閉じる</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto; max-height:500px;">
+        <table id="sellerItemsTable">
+          <thead><tr><th>商品名</th><th>価格</th><th>クロール日</th><th>リンク</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer style="text-align:center; color:#64748b; font-size:0.75rem; padding:24px;">Mercari Hunter Dashboard — 約毎 30 秒自動更新</footer>
+
+{% raw %}
+<script>
+const API = '';
+let charts = {};
+let currentPage = 0;
+const PAGE_SIZE = 30;
+
+// ── Utility ──────────────────────────────────────────────────
+function fmt(n) { return n != null ? Number(n).toLocaleString('ja-JP') : '—'; }
+function fmtYen(n) { return n != null ? '¥' + Number(n).toLocaleString('ja-JP') : '—'; }
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return dt.toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+async function json(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ── Summary ──────────────────────────────────────────────────
+async function loadSummary() {
+  const d = await json(API + '/api/summary');
+  document.getElementById('s-total').textContent    = fmt(d.total_items);
+  document.getElementById('s-keywords').textContent = fmt(d.active_keywords);
+  document.getElementById('s-brands').textContent   = fmt(d.brands);
+  document.getElementById('s-avg').textContent      = fmtYen(d.avg_price);
+  document.getElementById('s-median').textContent   = fmtYen(d.median_price);
+  document.getElementById('s-last').textContent     = fmtDate(d.last_crawl);
+  document.getElementById('lastUpdate').textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP');
+}
+
+// ── Price Distribution ───────────────────────────────────────
+async function loadPriceDist() {
+  const d = await json(API + '/api/price_distribution?bins=12');
+  const labels = d.map(r => '¥' + fmt(r.bin_start) + '~' + fmt(r.bin_end));
+  const data   = d.map(r => r.count);
+  if (charts.priceDist) charts.priceDist.destroy();
+  charts.priceDist = new Chart(document.getElementById('chartPriceDist'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '件数', data, backgroundColor: 'rgba(99,102,241,0.6)', borderColor: '#6366f1', borderWidth: 1, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false }, y: { grid: { color: '#1e2233' }, ticks: { color: '#94a3b8' } } }
+    }
+  });
+}
+
+// ── Price Trend ──────────────────────────────────────────────
+async function loadTrend() {
+  const d = await json(API + '/api/price_trend?hours=24');
+  if (!d.length) return;
+  const labels = d.map(r => { const h = new Date(r.hour); return h.getHours() + ':00'; });
+  if (charts.trend) charts.trend.destroy();
+  charts.trend = new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '件数', data: d.map(r => r.cnt), borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.15)', fill: true, tension: 0.3, pointRadius: 2 },
+        { label: '平均価格', data: d.map(r => r.avg_price), borderColor: '#f59e0b', tension: 0.3, pointRadius: 2, yAxisID: 'y1' }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: {
+        x: { grid: { color: '#1e2233' }, ticks: { color: '#94a3b8', maxTicksLimit: 12 } },
+        y:  { position: 'left', grid: { color: '#1e2233' }, ticks: { color: '#94a3b8' } },
+        y1: { position: 'right', grid: { display: false }, ticks: { color: '#f59e0b' } }
+      }
+    }
+  });
+}
+
+// ── Brands Table ─────────────────────────────────────────────
+async function loadBrands() {
+  const d = await json(API + '/api/brands?limit=15');
+  document.getElementById('brandCount').textContent = '(' + d.length + ' ブランド)';
+  document.querySelector('#brandTable tbody').innerHTML = d.map(function(r) {
+    return '<tr><td><span class="badge badge-purple">' + esc(r.brand) + '</span></td>' +
+      '<td>' + fmt(r.cnt) + '</td><td>' + fmtYen(r.avg_price) + '</td>' +
+      '<td>' + fmtYen(r.median_price) + '</td><td>' + fmtYen(r.min_price) + '</td>' +
+      '<td>' + fmtYen(r.max_price) + '</td></tr>';
+  }).join('');
+  // Populate brand filter dropdown
+  const sel = document.getElementById('brandFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全ブランド</option>' + d.map(function(r) {
+    return '<option value="' + esc(r.brand) + '" ' + (r.brand===cur?'selected':'') + '>' + esc(r.brand) + '</option>';
+  }).join('');
+}
+
+// ── Keywords ─────────────────────────────────────────────────
+async function loadKeywords() {
+  const d = await json(API + '/api/keywords');
+  document.querySelector('#keywordTable tbody').innerHTML = d.map(function(r) {
+    const status = r.enabled ? '<span class="badge badge-green">有効</span>' : '<span class="badge badge-red">無効</span>';
+    return '<tr><td>' + esc(r.name) + '</td><td>' + (r.category || '—') + '</td>' +
+      '<td>' + fmt(r.total_items) + '</td><td>' + fmtYen(r.avg_price) + '</td>' +
+      '<td>' + fmtDate(r.last_seen) + '</td><td>' + status + '</td></tr>';
+  }).join('');
+  // Populate category filter dropdown
+  const sel = document.getElementById('catFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全カテゴリ</option>' + d.filter(function(r) { return r.category; }).map(function(r) {
+    return '<option value="' + esc(r.name) + '" ' + (r.name===cur?'selected':'') + '>' + esc(r.category) + '</option>';
+  }).join('');
+}
+
+// ── Items List ───────────────────────────────────────────────
+async function loadItems() {
+  const q     = document.getElementById('searchQ').value;
+  const sort  = document.getElementById('sortSelect').value;
+  const brand = document.getElementById('brandFilter').value;
+  const cat   = document.getElementById('catFilter').value;
+  const params = new URLSearchParams({ offset: currentPage, limit: PAGE_SIZE, sort, brand, category: cat, q });
+  const d = await json(API + '/api/items?' + params);
+
+  document.getElementById('itemCount').textContent = '(' + fmt(d.total) + '件中)';
+  const totalPages = Math.ceil(d.total / PAGE_SIZE);
+  document.getElementById('pageInfo').textContent = (currentPage / PAGE_SIZE + 1) + ' / ' + totalPages + ' 頁';
+  document.getElementById('btnPrev').disabled = currentPage === 0;
+  document.getElementById('btnNext').disabled = currentPage + PAGE_SIZE >= d.total;
+
+  document.querySelector('#itemsTable tbody').innerHTML = d.items.map(function(r) {
+    const pc = r.price < 5000 ? '#6ee7b7' : r.price > 50000 ? '#fcd34d' : '#e2e8f0';
+    return '<tr><td style="max-width:256px"><a href="' + r.url + '" target="_blank" class="item-link">' + esc(r.name) + '</a></td>' +
+      '<td>' + (r.brand || '—') + '</td><td>' + (r.model || '—') + '</td>' +
+      '<td style="font-family:monospace; color:' + pc + '">' + fmtYen(r.price) + '</td>' +
+      '<td>' + (r.category || '—') + '</td><td>' + fmtDate(r.crawled_at) + '</td>' +
+      '<td><a href="' + r.url + '" target="_blank" style="color:#818cf8; font-size:0.75rem;">mercari ↗</a></td></tr>';
+  }).join('');
+}
+
+function nextPage()  { currentPage += PAGE_SIZE; loadItems(); }
+function prevPage()  { currentPage = Math.max(0, currentPage - PAGE_SIZE); loadItems(); }
+
+// ── Bargains ─────────────────────────────────────────────────
+async function loadBargains() {
+  const d = await json(API + '/api/bargains?limit=10');
+  const tbody = document.querySelector('#bargainTable tbody');
+  if (!d.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:32px;">現在掘り出し物なし</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.map(function(r) {
+    const diff = r.price_median - r.price;
+    const pct = ((1 - r.price / r.price_median) * 100).toFixed(0);
+    return '<tr><td style="max-width:200px"><a href="' + r.url + '" target="_blank" class="item-link">' + esc(r.name) + '</a></td>' +
+      '<td style="color:#6ee7b7; font-family:monospace;">' + fmtYen(r.price) + '</td>' +
+      '<td style="font-family:monospace;">' + fmtYen(r.price_median) + '</td>' +
+      '<td><span class="badge badge-green">-' + pct + '% (' + fmt(diff) + '円)</span></td>' +
+      '<td><a href="' + r.url + '" target="_blank" style="color:#818cf8; font-size:0.75rem;">mercari ↗</a></td></tr>';
+  }).join('');
+}
+
+// ── Market Prices ────────────────────────────────────────────
+async function loadMarketPrices() {
+  const d = await json(API + '/api/market_prices?limit=15');
+  document.getElementById('mpCount').textContent = '(' + d.length + ' 件)';
+  document.querySelector('#mpTable tbody').innerHTML = d.map(function(r) {
+    return '<tr><td style="max-width:200px">' + esc(r.item_name) + '</td>' +
+      '<td>' + (r.brand || '—') + '</td><td>' + (r.model || '—') + '</td>' +
+      '<td style="font-family:monospace;">' + fmtYen(r.price_median) + '</td>' +
+      '<td style="font-family:monospace;">' + fmtYen(r.price_mean) + '</td>' +
+      '<td style="font-family:monospace;">' + fmtYen(r.price_min) + '</td>' +
+      '<td style="font-family:monospace;">' + fmtYen(r.price_max) + '</td>' +
+      '<td>' + fmt(r.sample_count) + '</td></tr>';
+  }).join('');
+}
+
+// ── Sellers ──────────────────────────────────────────────────
+let currentSellerUser = null;
+async function loadSellers() {
+  const d = await json(API + '/api/sellers');
+  document.getElementById('sellerCount').textContent = '(' + d.length + ' 出品者)';
+  const tbody = document.querySelector('#sellerTable tbody');
+  if (!d.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:32px;">出品者未登録。CLI で --add-seller username を使用してください。</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.map(function(r) {
+    const status = r.enabled ? '<span class="badge badge-green">有効</span>' : '<span class="badge badge-red">無効</span>';
+    return '<tr><td><a href="https://jp.mercari.com/user/profile/' + esc(r.username) + '" target="_blank" class="item-link">' + esc(r.username) + '</a></td>' +
+      '<td>' + (r.name || '—') + '</td><td>' + fmt(r.total_items) + '</td>' +
+      '<td>' + fmtYen(r.avg_price) + '</td><td>' + fmtDate(r.last_crawled) + '</td>' +
+      '<td>' + status + '</td>' +
+      '<td><button onclick="showSellerItems(\'' + esc(r.username) + '\')" style="padding:4px 10px; background:rgba(99,102,241,0.2); color:#818cf8; border:1px solid #2a2f45; border-radius:6px; cursor:pointer; font-size:0.8rem;">商品を表示</button></td></tr>';
+  }).join('');
+}
+
+function showSellerItems(username) {
+  currentSellerUser = username;
+  document.getElementById('sellerItemsPanel').style.display = 'block';
+  document.getElementById('sellerItemsTitle').textContent = username + ' の商品一覧';
+  loadSellerItems();
+  // Scroll to panel
+  document.getElementById('sellerItemsPanel').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadSellerItems() {
+  if (!currentSellerUser) return;
+  const sort = document.getElementById('sellerSortSelect').value;
+  const d = await json(API + '/api/seller_items?username=' + encodeURIComponent(currentSellerUser) + '&limit=50&sort=' + sort);
+  const tbody = document.querySelector('#sellerItemsTable tbody');
+  if (!d.items.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b; padding:32px;">商品なし</td></tr>';
+    return;
+  }
+  document.getElementById('sellerItemsTitle').textContent = currentSellerUser + ' の商品一覧 (' + d.total + '件)';
+  tbody.innerHTML = d.items.map(function(r) {
+    const pc = r.price < 5000 ? '#6ee7b7' : r.price > 50000 ? '#fcd34d' : '#e2e8f0';
+    return '<tr><td style="max-width:256px"><a href="' + r.url + '" target="_blank" class="item-link">' + esc(r.name) + '</a></td>' +
+      '<td style="font-family:monospace; color:' + pc + ';">' + fmtYen(r.price) + '</td>' +
+      '<td>' + fmtDate(r.crawled_at) + '</td>' +
+      '<td><a href="' + r.url + '" target="_blank" style="color:#818cf8; font-size:0.75rem;">mercari ↗</a></td></tr>';
+  }).join('');
+}
+
+// ── Refresh ──────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([
+    loadSummary(), loadPriceDist(), loadTrend(), loadBrands(),
+    loadKeywords(), loadItems(), loadBargains(), loadMarketPrices(), loadSellers()
+  ]);
+}
+
+refreshAll();
+setInterval(refreshAll, 30000);
+</script>
+{% endraw %}
+
+</body>
+</html>
