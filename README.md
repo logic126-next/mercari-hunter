@@ -5,7 +5,9 @@
 ## 機能
 
 - **キーワード登録** — データベースで管理（複数キーワード同時監視）
+- **出品者監視** — 指定出品者（seller）の新着商品を取得・追跡
 - **Mercari 検索** — キーワードごとに検索ページをクロールして商品データを取得
+- **出品中限定** — `is_soldout=false` で出品中の商品のみ対象
 - **ページネーション対応** — `page_token` ベースの複数ページ巡回、`max_items` 上限付き（デフォルト 100 件）
 - **最新順ソート** — `sort=created_time` で最新出品順に取得
 - **属性抽出** — 商品名からブランド・型番・容量を regex で自動解析
@@ -13,6 +15,7 @@
 - **掘り出し物検知** — 5-level matching（exact → brand+model → brand → category → fallback）で相場的な安値を検出
 - **防重複** — 同一商品は `ON CONFLICT DO UPDATE` で上書
 - **Telegram 通知** — 掘り出し物を画像付きで即時通知
+- **Web Dashboard** — FastAPI + Chart.js + Tailwind CSS でリアルタイム可視化（ポート 8501）
 - **主ループ型定期実行** — 設定間隔でランダムウェイト付き自動巡回（80〜120秒程度）
 - **動的キーワード管理** — DB 追加・削除・有効/無効でリアルタイム反映（リSTART不要）
 
@@ -30,7 +33,8 @@
                     │  (items,      │        │ Bot API   │
                     │  market_      │        │           │
                     │  prices,      │        │           │
-                    │  keywords)    │        │           │
+                    │  keywords,    │        │           │
+                    │  sellers)     │        │           │
                     └──────────────┘        └──────────┘
 ```
 
@@ -60,17 +64,45 @@ cp .env.example .env
 # .env に Telegram Bot Token / Chat ID を入力
 
 # 4. キーワードをデータベースに追加
-python3 main.py --add "Apple" "https://jp.mercari.com/search?brand_id=3272"
+python3 main.py --add "Apple" "https://jp.mercari.com/items?item_name=Apple"
 python3 main.py --add "SSD" "SSD"
-python3 main.py --add "iPhone" "iPhone"
-python3 main.py --add "ゲーミングPC" "ゲーミングPC"
 
-# 5. （オプション）config.yaml を編集（閾値・通知・ページネーション等）
-python3 main.py --test
+# 5. 出品者を登録
+python3 main.py --add-seller 418454953
 
-# 6. 本番起動
+# 6. テスト実行
+python3 main.py --test        # キーワード1件だけテスト
+python3 main.py --test-seller 418454953   # 出品者テスト
+
+# 7. 本番起動
 tmux new -s mercari_hunter 'source .venv/bin/activate && python3 main.py'
 ```
+
+## Dashboard
+
+```bash
+# FastAPI Dashboard（ポート 8501）
+uvicorn app.api_server:app --reload --host 0.0.0.0 --port 8501
+```
+
+ブラウザで `http://localhost:8501` にアクセス。
+
+### API エンドポイント
+
+| エンドポイント | 説明 |
+|---------------|------|
+| `/` | Dashboard 画面 |
+| `/api/summary` | 全体的な統計サマリー |
+| `/api/price_distribution` | 価格分布（ヒストグラム） |
+| `/api/brands` | ブランド別ランキング |
+| `/api/keywords` | 登録キーワード一覧 |
+| `/api/items` | 商品一覧（フィルタ・ソート対応） |
+| `/api/price_trend` | 価格トレンド |
+| `/api/market_prices` | 相場データ |
+| `/api/bargains` | 掘り出し物一覧 |
+| `/api/sellers` | 監視出品者一覧 |
+| `/api/seller_items` | 出品者の商品一覧 |
+| `/api/categories` | カテゴリ一覧 |
 
 ## 使い方
 
@@ -78,11 +110,17 @@ tmux new -s mercari_hunter 'source .venv/bin/activate && python3 main.py'
 |---------|------|
 | `python3 main.py` | 本番モード（ランダムウェイト付きループ実行） |
 | `python3 main.py --test` | 1回だけスキャンして終了（最初のキーワードのみ） |
+| `python3 main.py --test-seller USERNAME` | 出品者1回だけスキャンして終了 |
 | `python3 main.py --list` | 登録キーワード一覧表示 |
-| `python3 main.py --add NAME TERM` | キーワード追加（TERM は検索語または URL） |
+| `python3 main.py --list-sellers` | 登録出品者一覧表示 |
+| `python3 main.py --add NAME TERM` | キーワード追加 |
 | `python3 main.py --remove NAME` | キーワード削除 |
 | `python3 main.py --enable NAME` | キーワード有効化 |
 | `python3 main.py --disable NAME` | キーワード無効化 |
+| `python3 main.py --add-seller USERNAME` | 出品者追加 |
+| `python3 main.py --remove-seller USERNAME` | 出品者削除 |
+| `python3 main.py --enable-seller USERNAME` | 出品者有効化 |
+| `python3 main.py --disable-seller USERNAME` | 出品者無効化 |
 | `tmux attach -t mercari_hunter` | 実行中のログを確認（`Ctrl+B` → `D` でデタッチ） |
 | `tmux kill-session -t mercari_hunter` | 停止 |
 
@@ -117,7 +155,7 @@ tmux new -s mercari_hunter 'source .venv/bin/activate && python3 main.py'
 python3 main.py --list
 
 # 追加（検索語または URL）
-python3 main.py --add "Apple" "https://jp.mercari.com/search?brand_id=3272"
+python3 main.py --add "Apple" "https://jp.mercari.com/items?item_name=Apple"
 python3 main.py --add "SSD" "SSD"
 
 # 削除
@@ -126,6 +164,22 @@ python3 main.py --remove "SSD"
 # 有効/無効
 python3 main.py --enable "SSD"
 python3 main.py --disable "SSD"
+```
+
+### 出品者管理
+
+```bash
+# 出品者追加・一覧・削除
+python3 main.py --add-seller 418454953
+python3 main.py --list-sellers
+python3 main.py --remove-seller 418454953
+
+# 有効/無効
+python3 main.py --enable-seller 418454953
+python3 main.py --disable-seller 418454953
+
+# テスト
+python3 main.py --test-seller 418454953
 ```
 
 ### SQL 直接操作
@@ -160,9 +214,18 @@ psql -U mercari -d mercari -c "DELETE FROM keywords WHERE name = 'Nintendo Switc
 | `notify_on` | TEXT | 通知トリガー | `'["new","bargain"]'` |
 | `enabled` | BOOL | 有効/無効 | `TRUE` |
 
+### 出品者テーブル構造
+
+| カラム | 型 | 説明 | デフォルト |
+|--------|------|------|-----------|
+| `username` | TEXT | 出品者名（一意） | — |
+| `name` | TEXT | 出品者表示名 | `""` |
+| `enabled` | BOOL | 有効/無効 | `TRUE` |
+
 ## クローラー設定
 
 - **ページネーション** — `page_token` 游标分页，自动翻页直到 `max_items` 上限或无新商品
+- **出品中限定** — 検索・出品者とも `is_soldout=false` で出品中の商品のみ取得
 - **デフォルト max_items** — 100 件/キーワード/スキャン（config.yaml `crawler.max_items` で調整）
 - **ソート** — 常に `sort=created_time`（最新出品順）
 - **ビューポート** — 固定 1920×1080
@@ -175,9 +238,11 @@ psql -U mercari -d mercari -c "DELETE FROM keywords WHERE name = 'Nintendo Switc
 | `crawler` | スクレイピング設定（`max_items`, `max_retries`, `timeout`, `wait_min`, `wait_max`） |
 | `market_price` | 相場判定閾値（`lookback_days`, `threshold_ratio`, `absolute_threshold_yen`） |
 | `filtering` | フィルター（許可状態、除外キーワード） |
-| `notification` | 通知チャネル設定（Telegram Bot Token / Chat ID） |
+| `notification` | 通知チャネル設定（シークレットは `.env` で管理） |
 | `warmup` | ウォームアップ回数（通知 OFF でデータ収集） |
 | `database` | PostgreSQL 接続情報 |
+
+**シークレット管理**: Telegram Bot Token / Chat ID は `.env` ファイルで管理（`config.yaml` に記載しない）。
 
 設定変更は次回スキャン時に自動的に反映されます（リSTART不要）。
 
@@ -188,14 +253,18 @@ mercari-hunter/
 ├── main.py              # エントリポイント・主ループ
 ├── config.yaml          # 設定ファイル
 ├── .env                 # シークレット（git 除外）
-├── .env.example
+├── .env.example         # 環境変数テンプレート
 ├── docker-compose.yml   # Docker デプロイ用
+├── app/
+│   ├── api_server.py    # FastAPI Dashboard API
+│   └── templates/
+│       └── dashboard.html  # Dashboard 画面
 ├── src/
 │   ├── crawler.py       # Playwright スクレイパー（ページネーション対応）
 │   ├── extractor.py     # 属性抽出（ブランド・型番・容量）
 │   ├── filter_engine.py # フィルター（状態・禁止ワード）
 │   ├── market_price.py  # 相場計算（中央値・IQR 外れ値除去）
-│   ├── models.py        # PostgreSQL ORM（items, market_prices, keywords）
+│   ├── models.py        # PostgreSQL ORM（items, market_prices, keywords, sellers）
 │   ├── normalizer.py    # 商品名正規化
 │   └── notifier.py      # Telegram 通知
 ├── logs/
@@ -208,7 +277,8 @@ mercari-hunter/
 | テーブル | 説明 |
 |---|---|
 | `keywords` | 検索キーワード（動的管理） |
-| `items` | クロールした全商品（`mercari_id`, `name`, `price`, `brand`, `model`, `capacity`, `attributes`, `last_notified_price` 等 19 カラム） |
+| `sellers` | 監視出品者（動的管理） |
+| `items` | クロールした全商品（`mercari_id`, `name`, `price`, `brand`, `model`, `capacity`, `attributes`, `last_notified_price`, `seller_username` 等） |
 | `market_prices` | 属性ごとの相場データ（`item_name`, `brand`, `model`, `price_median`, `price_mean`, `sample_count`） |
 
 ## 注意
@@ -218,6 +288,7 @@ mercari-hunter/
 - 大量のキーワードを監視する場合はウェイト間隔を広げてください
 - **ページネーション** — 各キーワードごとに最大 `max_items` 件まで複数ページ巡回（デフォルト 100 件）
 - **掘り出し物検知** — 価格が相場中央値の `threshold_ratio`（デフォルト 0.7 倍）以下 **かつ** `absolute_threshold_yen`（デフォルト 10,000 円）以上の差がある場合
+- **出品中限定** — `is_soldout=false` で出品中の商品のみ取得
 
 ## Mac mini へのデプロイ
 
@@ -245,7 +316,7 @@ createdb mercari
 
 ```bash
 # 4. リポジトリをクローンして依存をインストール
-git clone <repo-url> mercari-hunter
+git clone git@github.com:logic126-next/mercari-hunter.git
 cd mercari-hunter
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -257,10 +328,8 @@ playwright install chromium
 # 5. 環境変数・キーワード設定
 cp .env.example .env
 # .env に Telegram Bot Token / Chat ID を入力
-python3 main.py --add "Apple" "https://jp.mercari.com/search?brand_id=3272"
+python3 main.py --add "Apple" "https://jp.mercari.com/items?item_name=Apple"
 python3 main.py --add "SSD" "SSD"
-python3 main.py --add "iPhone" "iPhone"
-python3 main.py --add "ゲーミングPC" "ゲーミングPC"
 
 # 6. テスト実行
 python3 main.py --test
