@@ -304,40 +304,46 @@ Mac mini で常時稼働させる場合の手順です。
 
 ```bash
 # 1. 依存パッケージのインストール
-brew install python@3.12 postgresql@15
+brew install python postgresql@17
 
 # 2. PostgreSQL を起動
-brew services start postgresql@15
+brew services start postgresql@17
 
-# 3. ユーザーと DB を作成
-createuser -s $(whoami)
-createdb mercari
-```
+# 3. ユーザーと DB を作成（config.yaml に定義されているユーザー名と一致させる）
+createuser -S -d mercari
+createdb -O mercari mercari
 
-```bash
 # 4. リポジトリをクローンして依存をインストール
 git clone git@github.com:logic126-next/mercari-hunter.git
 cd mercari-hunter
-python3.12 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-```
 
-```bash
-# 5. 環境変数・キーワード設定
+# 5. 環境変数を設定
 cp .env.example .env
 # .env に Telegram Bot Token / Chat ID を入力
+
+# 6. キーワードを登録
 python3 main.py --add "Apple" "https://jp.mercari.com/items?item_name=Apple"
 python3 main.py --add "SSD" "SSD"
 
-# 6. テスト実行
+# 7. テスト実行
 python3 main.py --test
+
+# 8. 本番起動
+tmux new -s mercari_hunter 'source .venv/bin/activate && python3 main.py'
+
+# 9. Dashboard 起動（別ターミナル）
+tmux new -s mercari_dashboard 'source .venv/bin/activate && uvicorn app.api_server:app --host 0.0.0.0 --port 8501'
 ```
 
 ### launchd での常時稼働
 
-macOS は systemd ではなく launchd を使用します。plist ファイルを作成：
+macOS は systemd ではなく launchd を使用します。
+
+#### 1. plist ファイルを作成
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
@@ -355,15 +361,15 @@ mkdir -p ~/Library/LaunchAgents
     <string>com.mercari.hunter</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/$(whoami)/workspace/mercari-hunter/.venv/bin/python3</string>
-        <string>/Users/$(whoami)/workspace/mercari-hunter/main.py</string>
+        <string>/Users/___USER___/workspace/mercari-hunter/.venv/bin/python3</string>
+        <string>/Users/___USER___/workspace/mercari-hunter/main.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/$(whoami)/workspace/mercari-hunter</string>
+    <string>/Users/___USER___/workspace/mercari-hunter</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -377,40 +383,107 @@ mkdir -p ~/Library/LaunchAgents
 </plist>
 ```
 
+`~/Library/LaunchAgents/com.mercari.dashboard.plist`（Dashboard）を作成：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mercari.dashboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/___USER___/workspace/mercari-hunter/.venv/bin/uvicorn</string>
+        <string>app.api_server:app</string>
+        <string>--host</string><string>0.0.0.0</string>
+        <string>--port</string><string>8501</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/___USER___/workspace/mercari-hunter</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/mercari_dashboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/mercari_dashboard_err.log</string>
+</dict>
+</plist>
+```
+
+#### 2. 路径替换
+
+```bash
+# plist 内の ___USER___ を実際のユーザー名に置換
+USER=$(whoami)
+sed -i '' "s/___USER___/$USER/g" ~/Library/LaunchAgents/com.mercari.hunter.plist
+sed -i '' "s/___USER___/$USER/g" ~/Library/LaunchAgents/com.mercari.dashboard.plist
+```
+
+#### 3. 登録・起動
+
 ```bash
 # launchd に登録・起動
 launchctl load ~/Library/LaunchAgents/com.mercari.hunter.plist
+launchctl load ~/Library/LaunchAgents/com.mercari.dashboard.plist
 
 # 動作確認
 launchctl list | grep mercari
 
 # ログ確認
 tail -f /tmp/mercari_hunter.log
+tail -f /tmp/mercari_dashboard.log
 
-# 停止
-launchctl stop com.mercari.hunter
-
-# 再起動
-launchctl stop com.mercari.hunter && launchctl start com.mercari.hunter
-
-# 登録解除
-launchctl unload ~/Library/LaunchAgents/com.mercari.hunter.plist
+# Dashboard アクセス（ブラウザ）
+# http://localhost:8501
 ```
 
-> **注意**: plist の `$(whoami)` は展開しないでそのまま記述。コピー後 `sed` で置換してください：
-> ```bash
-> sed -i '' "s/\$(whoami)/$(whoami)/g" ~/Library/LaunchAgents/com.mercari.hunter.plist
-> ```
+#### 4. 操作コマンド
+
+| 操作 | コマンド |
+|------|---------|
+| Crawler 停止 | `launchctl stop com.mercari.hunter` |
+| Crawler 再起動 | `launchctl stop com.mercari.hunter && launchctl start com.mercari.hunter` |
+| Dashboard 停止 | `launchctl stop com.mercari.dashboard` |
+| Dashboard 再起動 | `launchctl stop com.mercari.dashboard && launchctl start com.mercari.dashboard` |
+| 登録解除 | `launchctl unload ~/Library/LaunchAgents/com.mercari.hunter.plist` |
 
 ### Docker Compose でのデプロイ（推奨）
 
-`docker-compose.yml` が含まれている場合は、よりクリーンなデプロイが可能です：
+DB とアプリケーションをコンテナで完結させる方式です。
 
 ```bash
+# 1. .env に Telegram Bot Token / Chat ID を設定
+cp .env.example .env
+
+# 2. 起動（DB + crawler + Dashboard が自動的に立ち上がる）
 docker compose up -d
+
+# 3. Dashboard アクセス
+# http://localhost:8501
+
+# 4. 動作確認
+docker compose ps
+docker compose logs -f
+
+# 5. 停止
+docker compose down
 ```
 
-詳細は `docker-compose.yml` を参照してください。
+> DB 内のキーワードはホストから `psql` で操作可能：
+> ```bash
+> docker compose exec postgres psql -U mercari -d mercari \
+>   -c "INSERT INTO keywords (name, search_term) VALUES ('Apple', 'Apple')
+>   ON CONFLICT (name) DO UPDATE SET search_term = EXCLUDED.search_term;"
+> ```
 
 ## ライセンス
 

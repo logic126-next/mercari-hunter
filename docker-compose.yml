@@ -6,13 +6,13 @@ services:
     container_name: mercari-hunter-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: mercari_hunter
-      POSTGRES_USER: mercari_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-mercari_password}
+      POSTGRES_DB: mercari
+      POSTGRES_USER: mercari
+      POSTGRES_PASSWORD: mercari
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mercari_user -d mercari_hunter"]
+      test: ["CMD-SHELL", "pg_isready -U mercari -d mercari"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,11 +26,13 @@ services:
     environment:
       DATABASE_HOST: "postgres"
       DATABASE_PORT: "5432"
-      DATABASE_DBNAME: "mercari_hunter"
-      DATABASE_USER: "mercari_user"
-      DATABASE_PASSWORD: ${DB_PASSWORD:-mercari_password}
+      DATABASE_DBNAME: "mercari"
+      DATABASE_USER: "mercari"
+      DATABASE_PASSWORD: "mercari"
     volumes:
       - ./logs:/app/logs
+    ports:
+      - "8501:8501"
     depends_on:
       postgres:
         condition: service_healthy
