@@ -197,7 +197,13 @@ class DatabaseManager:
         """Create tables if they don't exist; add missing columns to existing tables."""
         conn = self.get_connection()
         try:
-            # Step 1: Add missing columns to existing tables (backward compat migration)
+            # Step 1: Create tables first (IF NOT EXISTS is idempotent)
+            with conn.cursor() as cur:
+                cur.execute(SCHEMA_SQL)
+                cur.execute(POST_MIGRATION_INDEXES)
+            conn.commit()
+
+            # Step 2: Add missing columns to existing tables (backward compat migration)
             MIGRATION_COLS = [
                 ("items", "brand", "TEXT"),
                 ("items", "model", "TEXT"),
@@ -219,10 +225,9 @@ class DatabaseManager:
                             )
                         print(f"[DB] Added missing column: {tbl}.{col_name}")
 
-            # Commit migration before running schema (ensures catalog is refreshed)
             conn.commit()
 
-            # Step 1b: Add last_notified_price column if missing
+            # Step 3: Add last_notified_price column if missing
             for tbl, col_name, col_type in MIGRATION_NOTIFIED:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -237,13 +242,6 @@ class DatabaseManager:
                                 f'ALTER TABLE {tbl} ADD COLUMN {col_name} {col_type}'
                             )
                         print(f"[DB] Added missing column: {tbl}.{col_name}")
-
-            conn.commit()
-
-            # Step 2: Create tables and indexes (IF NOT EXISTS is idempotent)
-            with conn.cursor() as cur:
-                cur.execute(SCHEMA_SQL)
-                cur.execute(POST_MIGRATION_INDEXES)
 
             conn.commit()
         except psycopg2.Error as e:
