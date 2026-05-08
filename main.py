@@ -60,11 +60,15 @@ def list_keywords(db: DatabaseManager):
     if not keywords:
         print("No keywords configured.")
         return
-    print(f"{'ID':<4} {'Name':<30} {'Enabled':<8}")
-    print("-" * 50)
+    print(f"{'ID':<4} {'Name':<30} {'Enabled':<8} {'Min':<8} {'Max':<8}")
+    print("-" * 60)
     for kw in keywords:
         status = "ON" if kw.get("enabled", True) else "OFF"
-        print(f"{kw['id']:<4} {kw['name']:<30} {status:<8}")
+        min_p = kw.get("min_price", 0) or 0
+        max_p = kw.get("max_price", 0) or 0
+        min_str = f"¥{min_p}" if min_p else "-"
+        max_str = f"¥{max_p}" if max_p else "-"
+        print(f"{kw['id']:<4} {kw['name']:<30} {status:<8} {min_str:<8} {max_str:<8}")
 
 
 def list_sellers(db: DatabaseManager):
@@ -217,8 +221,10 @@ def process_keyword(keyword: dict, crawler: MercariCrawler,
     logger.info(f"Crawled {len(raw_items)} items for '{name}'")
 
     # 2. Filter
-    filtered_items = filter_engine.filter_items(raw_items)
-    logger.info(f"Filtered to {len(filtered_items)} items for '{name}'")
+    kw_min_price = keyword.get("min_price", 0) or 0
+    kw_max_price = keyword.get("max_price", 0) or 0
+    filtered_items = filter_engine.filter_items(raw_items, min_price=kw_min_price, max_price=kw_max_price)
+    logger.info(f"Filtered to {len(filtered_items)} items for '{name}' (price range: {kw_min_price or '∞'} - {kw_max_price or '∞'})")
 
     # 3. Save items (upsert)
     items_to_save = []
