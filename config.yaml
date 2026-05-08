@@ -40,7 +40,7 @@ warmup:
   rounds: 3                          # 初期ウォームアップ回数（通知なしでデータ収集）
 
 database:
-  host: "localhost"
+  host: "192.168.1.203"
   port: 5432
   dbname: "mercari"
   user: "mercari"
