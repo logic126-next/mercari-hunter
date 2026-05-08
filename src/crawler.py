@@ -120,7 +120,10 @@ class MercariCrawler:
         self._p = None
 
     def _extract_items_from_page(self, page) -> list[dict]:
-        """Wait for items to load, then extract from the current page."""
+        """Wait for items to load, then extract from the current page.
+
+        Filters out sold-out items by checking for '売り切れ' in aria-label.
+        """
         count = 0
         for _ in range(20):
             time.sleep(random.uniform(0.3, 0.7))
@@ -142,6 +145,14 @@ class MercariCrawler:
                 const href = link.href;
                 if (seen.has(href)) continue;
                 seen.add(href);
+                
+                // Skip sold-out items — check aria-label on thumbnail for "売り切れ"
+                const thumbnail = link.querySelector('.merItemThumbnail');
+                if (thumbnail) {
+                    const ariaLabel = thumbnail.getAttribute('aria-label') || '';
+                    if (ariaLabel.includes('売り切れ')) continue;
+                }
+                
                 const text = link.textContent.trim();
                 if (text.length < 5 || text.length > 500) continue;
                 const priceMatch = text.match(/¥\\s*([\\d,]+)/);
@@ -150,7 +161,7 @@ class MercariCrawler:
                     price = parseInt(priceMatch[1].replace(/,/g, '')) || 0;
                 }
                 if (price < 100 || price > 5000000) continue;
-                const idMatch = href.match(/\\/item\\/m(\\d+)/);
+                const idMatch = href.match(/\\/item\\/(m\\d+)/);
                 const mercariId = idMatch ? idMatch[1] : '';
                 const name = text.replace(/¥\\s*[\\d,]+/, '').replace(/\\s+/g, ' ').trim();
                 if (!mercariId || name.length < 2) continue;

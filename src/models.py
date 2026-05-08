@@ -392,18 +392,35 @@ class DatabaseManager:
                 # Group prices by (brand, model, capacity)
                 groups: dict[tuple, list[float]] = {}
                 for price, b, m, c in rows:
-                    key = (b or "unknown", m or "unknown", c or "unknown")
+                    # Use raw values (may be None/empty) for grouping
+                    key = (b or "", m or "", c or "")
                     groups.setdefault(key, []).append(price)
 
                 for (b, m, c), prices in groups.items():
                     if len(prices) < 1:
                         continue
 
+                    # Skip items where ALL attributes are missing —
+                    # these would produce meaningless "unknown unknown unknown" entries.
+                    if not b.strip() and not m.strip() and not c.strip():
+                        continue
+
+                    # Use display-friendly labels: empty → None (stored as NULL),
+                    # not "unknown".  If brand is empty but model/capacity are
+                    # known, just use what we have.
+                    b_label = b if b and b.strip() else None
+                    m_label = m if m and m.strip() else None
+                    c_label = c if c and c.strip() else None
+
+                    # Build a readable item_name from whatever we have
+                    parts = [p for p in (b_label, m_label, c_label) if p]
+                    item_name = " ".join(parts) if parts else "unidentified"
+
                     median = statistics.median(prices)
                     mean = statistics.mean(prices)
 
                     mp = MarketPrice(
-                        item_name=f"{b} {m} {c}",
+                        item_name=item_name,
                         price_median=median,
                         price_mean=mean,
                         price_min=min(prices),
@@ -416,7 +433,7 @@ class DatabaseManager:
                         SELECT id FROM market_prices
                         WHERE brand = %s AND model = %s AND capacity = %s
                         ORDER BY calculated_at DESC LIMIT 1
-                    """, (b, m, c))
+                    """, (b_label, m_label, c_label))
                     row = cur.fetchone()
 
                     if row:
@@ -437,7 +454,7 @@ class DatabaseManager:
                             (item_name, brand, model, capacity, category,
                              price_median, price_mean, price_min, price_max, sample_count)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (mp.item_name, b, m, c, keyword_name,
+                        """, (mp.item_name, b_label, m_label, c_label, keyword_name,
                               mp.price_median, mp.price_mean,
                               mp.price_min, mp.price_max, mp.sample_count))
                     saved += 1
