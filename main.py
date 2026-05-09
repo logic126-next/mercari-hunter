@@ -350,6 +350,21 @@ def main():
 
     setup_logging()
     config = load_config()
+
+    # Override DB credentials from environment variables
+    db_cfg = dict(config.get("database", {}))
+    for env_key, cfg_key in [
+        ("MERCARI_DB_HOST", "host"),
+        ("MERCARI_DB_PORT", "port"),
+        ("MERCARI_DB_NAME", "dbname"),
+        ("MERCARI_DB_USER", "user"),
+        ("MERCARI_DB_PASSWORD", "password"),
+    ]:
+        val = os.environ.get(env_key)
+        if val:
+            db_cfg[cfg_key] = int(val) if cfg_key == "port" else val
+    config["database"] = db_cfg
+
     db = DatabaseManager(config["database"])
 
     # CLI commands

@@ -44,4 +44,4 @@ database:
   port: 5432
   dbname: "mercari"
   user: "mercari"
-  password: "mercari"
+  # password comes from MERCARI_DB_PASSWORD env var
