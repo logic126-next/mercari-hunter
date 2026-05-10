@@ -178,7 +178,10 @@ select:focus, input:focus { outline: none; border-color: #6366f1; }
 
 {% raw %}
 <script>
-const API = '';
+// Auto-detect base path for reverse proxy support (e.g. /mercari/)
+const pathParts = window.location.pathname.split('/');
+const basePath = pathParts.length > 2 ? '/' + pathParts[1] : '';
+const API = basePath;
 let charts = {};
 let currentPage = 0;
 const PAGE_SIZE = 30;
