@@ -29,7 +29,11 @@ class TelegramNotifier:
             print("[Notifier] Chat ID: NOT SET")
 
     async def send_alert(self, item, bargain_details):
-        """Send a single bargain alert to Telegram.
+        """Send a single bargain alert to Telegram with image + caption.
+
+        Uses sendPhoto with caption when image_url is available — image and
+        text are delivered as ONE message. Falls back to sendMessage if no
+        image or if sendPhoto fails (so notifications are never lost).
 
         Args:
             item: dict or Item object with item details
@@ -56,10 +60,10 @@ class TelegramNotifier:
         diff_yen = bargain_details.get("difference_yen") or bargain_details.get("difference", 0)
         discount_pct = bargain_details.get("discount_percent", 0) or int((1 - bargain_details.get("ratio", 1)) * 100)
 
-        # Build message text (HTML mode)
+        # Build caption (HTML mode)
         item_name_html = item_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        text = (
+        caption = (
             "🔥 <b>掘り出し物発見！</b>\n\n"
             f"{item_name_html}\n\n"
             f"💰 価格: <code>¥{item_price:,}</code>\n"
@@ -68,9 +72,18 @@ class TelegramNotifier:
             f'<a href="{item_url}">商品ページを開く</a>'
         )
 
+        # If we have an image, send photo + caption in one message
+        if item_image_url:
+            sent = await self._send_photo_with_caption(caption, item_image_url)
+            if sent:
+                print(f"[Notifier] Alert (with photo) sent for {item_name}")
+                return True
+            # sendPhoto failed — fall through to text-only
+
+        # Fallback: text-only message
         payload = {
             "chat_id": self.chat_id,
-            "text": text,
+            "text": caption,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
@@ -83,12 +96,7 @@ class TelegramNotifier:
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status in (200, 204):
-                        print(f"[Notifier] Alert sent for {item_name}")
-
-                        # Send image separately if available
-                        if item_image_url:
-                            await self._send_image(session, item_image_url)
-
+                        print(f"[Notifier] Alert (text-only) sent for {item_name}")
                         return True
                     else:
                         err_text = await response.text()
@@ -97,6 +105,36 @@ class TelegramNotifier:
 
         except Exception as e:
             print(f"[Notifier] Error sending Telegram message: {e}")
+            return False
+
+    async def _send_photo_with_caption(self, caption: str, image_url: str) -> bool:
+        """Send photo with caption in a single Telegram message.
+
+        Telegram sendPhoto accepts remote URLs directly (static.mercdn.net works).
+        If the photo upload fails, returns False so caller falls back to text.
+        """
+        payload = {
+            "chat_id": self.chat_id,
+            "photo": image_url,
+            "caption": caption,
+            "parse_mode": "HTML",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                api_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+                async with session.post(
+                    api_url, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as response:
+                    if response.status in (200, 204):
+                        return True
+                    else:
+                        err_text = await response.text()
+                        print(f"[Notifier] sendPhoto failed: {response.status} - {err_text[:150]}")
+                        return False
+        except Exception as e:
+            print(f"[Notifier] sendPhoto error: {e}")
             return False
 
     async def send_bargain_alerts(self, bargain_details_list: list):
@@ -119,19 +157,6 @@ class TelegramNotifier:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 pool.submit(lambda: asyncio.run(self.send_bargain_alerts(bargain_details_list))).result()
-
-    async def _send_image(self, session, image_url: str):
-        """Send product photo separately"""
-        api_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
-        try:
-            async with session.post(
-                api_url, json={"chat_id": self.chat_id, "photo": image_url},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                if response.status not in (200, 204):
-                    print(f"[Notifier] Image send failed: {response.status}")
-        except Exception as e:
-            print(f"[Notifier] Image send error: {e}")
 
     async def close(self):
         pass
