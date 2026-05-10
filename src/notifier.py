@@ -71,56 +71,47 @@ class TelegramNotifier:
             f'<a href="{item_url}">商品ページを開く</a>'
         )
 
-        # If we have an image, send photo + caption in one message
-        if item_image_url:
-            sent = await self._send_photo_with_caption(caption, item_image_url)
-            if sent:
-                print(f"[Notifier] Alert (with photo) sent for {item_name}")
-                return True
-            # sendPhoto failed — fall through to text-only
-
-        # Fallback: text-only message
-        payload = {
+       # Send text message first (info always visible)
+        msg_payload = {
             "chat_id": self.chat_id,
             "text": caption,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
 
+        msg_id = None
         try:
             async with aiohttp.ClientSession() as session:
                 api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
                 async with session.post(
-                    api_url, json=payload,
+                    api_url, json=msg_payload,
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status in (200, 204):
-                        print(f"[Notifier] Alert (text-only) sent for {item_name}")
-                        return True
+                        result = await response.json()
+                        msg_id = result.get("result", {}).get("message_id")
+                        print(f"[Notifier] Alert sent for {item_name}")
                     else:
                         err_text = await response.text()
                         print(f"[Notifier] Failed: {response.status} - {err_text[:200]}")
                         return False
-
         except Exception as e:
             print(f"[Notifier] Error sending Telegram message: {e}")
             return False
 
-    async def _send_photo_with_caption(self, caption: str, image_url: str) -> bool:
-        """Send photo with caption in a single Telegram message.
+        # Send image as a reply (secondary, doesn't block notification)
+        if item_image_url and msg_id:
+            await self._send_image_reply(item_image_url, msg_id)
 
-        Strategy:
-        1. Try Telegram sendPhoto with URL directly — Telegram servers can
-           often fetch images that our server cannot (different IP/CDN rules).
-        2. If that fails, download the image locally and upload as multipart.
-        3. If both fail, return False so caller falls back to text-only.
+    async def _send_image_reply(self, image_url: str, reply_to_msg_id: int) -> None:
+        """Send product image as a reply to the text message.
+
+        Fire-and-forget — image failure does not affect the notification.
         """
-        # Attempt 1: Direct URL (Telegram server fetches the image)
         payload = {
             "chat_id": self.chat_id,
             "photo": image_url,
-            "caption": caption,
-            "parse_mode": "HTML",
+            "reply_to_message_id": reply_to_msg_id,
         }
         try:
             async with aiohttp.ClientSession() as session:
@@ -129,43 +120,9 @@ class TelegramNotifier:
                     api_url, json=payload,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
-                    if response.status in (200, 204):
-                        return True
+                    pass  # silent — success or failure doesn't matter
         except Exception:
             pass
-
-        # Attempt 2: Download locally and upload as multipart form
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
-                "Referer": "https://jp.mercari.com/",
-            }
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    image_url, timeout=aiohttp.ClientTimeout(total=15), headers=headers
-                ) as resp:
-                    if resp.status != 200:
-                        return False
-                    image_data = await resp.read()
-        except Exception:
-            return False
-
-        try:
-            from aiohttp import FormData
-            async with aiohttp.ClientSession() as session:
-                form = FormData()
-                form.add_field("chat_id", str(self.chat_id))
-                form.add_field("photo", image_data, filename="photo.jpg", content_type="image/jpeg")
-                form.add_field("caption", caption)
-                form.add_field("parse_mode", "HTML")
-                api_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
-                async with session.post(
-                    api_url, data=form,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    return response.status in (200, 204)
-        except Exception:
-            return False
 
     async def send_bargain_alerts(self, bargain_details_list: list):
         """Send multiple bargain alerts to Telegram."""
