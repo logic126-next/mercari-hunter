@@ -64,7 +64,6 @@ class TelegramNotifier:
         item_name_html = item_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         caption = (
-            "🔥 <b>掘り出し物発見！</b>\n\n"
             f"{item_name_html}\n\n"
             f"💰 価格: <code>¥{item_price:,}</code>\n"
             f"📊 相場中央値: <code>¥{market_median:,}</code>\n"
