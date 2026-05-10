@@ -109,16 +109,19 @@ class TelegramNotifier:
     async def _send_photo_with_caption(self, caption: str, image_url: str) -> bool:
         """Send photo with caption in a single Telegram message.
 
-        Telegram sendPhoto accepts remote URLs directly (static.mercdn.net works).
-        If the photo upload fails, returns False so caller falls back to text.
+        Strategy:
+        1. Try Telegram sendPhoto with URL directly — Telegram servers can
+           often fetch images that our server cannot (different IP/CDN rules).
+        2. If that fails, download the image locally and upload as multipart.
+        3. If both fail, return False so caller falls back to text-only.
         """
+        # Attempt 1: Direct URL (Telegram server fetches the image)
         payload = {
             "chat_id": self.chat_id,
             "photo": image_url,
             "caption": caption,
             "parse_mode": "HTML",
         }
-
         try:
             async with aiohttp.ClientSession() as session:
                 api_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
@@ -128,12 +131,40 @@ class TelegramNotifier:
                 ) as response:
                     if response.status in (200, 204):
                         return True
-                    else:
-                        err_text = await response.text()
-                        print(f"[Notifier] sendPhoto failed: {response.status} - {err_text[:150]}")
+        except Exception:
+            pass
+
+        # Attempt 2: Download locally and upload as multipart form
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+                "Referer": "https://jp.mercari.com/",
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    image_url, timeout=aiohttp.ClientTimeout(total=15), headers=headers
+                ) as resp:
+                    if resp.status != 200:
                         return False
-        except Exception as e:
-            print(f"[Notifier] sendPhoto error: {e}")
+                    image_data = await resp.read()
+        except Exception:
+            return False
+
+        try:
+            from aiohttp import FormData
+            async with aiohttp.ClientSession() as session:
+                form = FormData()
+                form.add_field("chat_id", str(self.chat_id))
+                form.add_field("photo", image_data, filename="photo.jpg", content_type="image/jpeg")
+                form.add_field("caption", caption)
+                form.add_field("parse_mode", "HTML")
+                api_url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+                async with session.post(
+                    api_url, data=form,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as response:
+                    return response.status in (200, 204)
+        except Exception:
             return False
 
     async def send_bargain_alerts(self, bargain_details_list: list):
