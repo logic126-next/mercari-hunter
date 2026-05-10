@@ -170,7 +170,13 @@ class MercariCrawler:
                     name: name.substring(0, 100),
                     price: price,
                     url: href,
-                    image_url: '',
+                    image_url: (function() {
+                        var img = link.querySelector('img[loading="lazy"], img.merItemThumbnail, img');
+                        if (img) {
+                            return img.getAttribute('data-src') || img.getAttribute('src') || '';
+                        }
+                        return '';
+                    })(),
                 });
             }
             return items;

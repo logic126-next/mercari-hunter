@@ -188,6 +188,7 @@ class MercariExtractor:
             category="",  # Will be set by config
             condition=self._extract_condition(container),
             description="",  # Would need to visit individual page
+            image_url=image_url,
             brand=brand,
             model=model,
             capacity=capacity,
