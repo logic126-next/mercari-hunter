@@ -29,21 +29,16 @@ class TelegramNotifier:
             print("[Notifier] Chat ID: NOT SET")
 
     async def send_alert(self, item, bargain_details):
-        """Send a single bargain alert to Telegram with image + caption.
+        """Send a single bargain alert to Telegram as one photo+caption message.
 
         Uses sendPhoto with caption when image_url is available — image and
         text are delivered as ONE message. Falls back to sendMessage if no
         image or if sendPhoto fails (so notifications are never lost).
-
-        Args:
-            item: dict or Item object with item details
-            bargain_details: dict with market_median, difference_yen, discount_percent
         """
         if not self.bot_token or not self.chat_id:
             print("[Notifier] No Telegram credentials configured")
             return False
 
-        # Support both dict and Item objects
         if isinstance(item, dict):
             item_name = item.get("name", "不明")
             item_price = item.get("price", 0)
@@ -55,12 +50,10 @@ class TelegramNotifier:
             item_url = item.url
             item_image_url = getattr(item, "image_url", "")
 
-        # Extract bargain details
         market_median = int(bargain_details.get("market_median", 0))
         diff_yen = bargain_details.get("difference_yen") or bargain_details.get("difference", 0)
         discount_pct = bargain_details.get("discount_percent", 0) or int((1 - bargain_details.get("ratio", 1)) * 100)
 
-        # Build caption (HTML mode)
         item_name_html = item_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         caption = (
@@ -71,37 +64,54 @@ class TelegramNotifier:
             f'<a href="{item_url}">商品ページを開く</a>'
         )
 
-       # Send text message first (info always visible)
-        msg_payload = {
-            "chat_id": self.chat_id,
-            "text": caption,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
+        api_base = f"https://api.telegram.org/bot{self.bot_token}"
 
-        msg_id = None
+        # Try sendPhoto with caption first (one message)
+        if item_image_url:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{api_base}/sendPhoto",
+                        json={
+                            "chat_id": self.chat_id,
+                            "photo": item_image_url,
+                            "caption": caption,
+                            "parse_mode": "HTML",
+                        },
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as response:
+                        if response.status in (200, 204):
+                            print(f"[Notifier] Alert sent for {item_name}")
+                            return True
+                        else:
+                            err_text = await response.text()
+                            print(f"[Notifier] sendPhoto failed: {response.status} - {err_text[:200]}")
+            except Exception as e:
+                print(f"[Notifier] sendPhoto error: {e}")
+
+        # Fallback: send text only
         try:
             async with aiohttp.ClientSession() as session:
-                api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
                 async with session.post(
-                    api_url, json=msg_payload,
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    f"{api_base}/sendMessage",
+                    json={
+                        "chat_id": self.chat_id,
+                        "text": caption,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status in (200, 204):
-                        result = await response.json()
-                        msg_id = result.get("result", {}).get("message_id")
-                        print(f"[Notifier] Alert sent for {item_name}")
+                        print(f"[Notifier] Alert sent (text fallback) for {item_name}")
+                        return True
                     else:
                         err_text = await response.text()
-                        print(f"[Notifier] Failed: {response.status} - {err_text[:200]}")
+                        print(f"[Notifier] sendMessage failed: {response.status} - {err_text[:200]}")
                         return False
         except Exception as e:
             print(f"[Notifier] Error sending Telegram message: {e}")
             return False
-
-        # Send image as a reply (secondary, doesn't block notification)
-        if item_image_url and msg_id:
-            await self._send_image_reply(item_image_url, msg_id)
 
     async def _send_image_reply(self, image_url: str, reply_to_msg_id: int) -> None:
         """Send product image as a reply to the text message.
